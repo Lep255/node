@@ -1,0 +1,1781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Node Canvas</title>
+<style>
+  :root{
+    --bg:#0f1117;
+    --panel:#171a22;
+    --panel-2:#1d2130;
+    --border:#2a3040;
+    --text:#e8ecf3;
+    --muted:#8f98aa;
+    --accent:#7c8cff;
+    --shadow:0 10px 30px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box}
+  html,body{width:100%;height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  button,input,textarea{font:inherit}
+
+  #app{
+    position:relative;
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background:
+      radial-gradient(circle at 1px 1px, rgba(190,200,220,.18) 1.2px, transparent 1.25px);
+    background-size:24px 24px;
+    background-position:0 0;
+  }
+
+  #workspace{
+    position:absolute;
+    inset:0;
+    transform-origin:0 0;
+  }
+
+  #connections{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    overflow:visible;
+    pointer-events:none;
+  }
+
+  .wire{
+    fill:none;
+    stroke-width:4;
+    stroke-linecap:round;
+    opacity:.95;
+    filter:drop-shadow(0 1px 3px rgba(0,0,0,.6));
+  }
+
+  .wire.selected{
+    stroke-width:6;
+  }
+
+  #nodes{
+    position:absolute;
+    inset:0;
+  }
+
+  .node{
+    position:absolute;
+    width:260px;
+    min-height:120px;
+    background:linear-gradient(180deg,rgba(29,33,48,.98),rgba(22,25,34,.98));
+    border:1px solid var(--border);
+    border-radius:14px;
+    box-shadow:var(--shadow);
+    overflow:visible;
+    user-select:none;
+  }
+
+  .node.selected{
+    outline:2px solid rgba(124,140,255,.7);
+  }
+
+  .node-header{
+    height:42px;
+    display:flex;
+    align-items:center;
+    gap:9px;
+    padding:0 12px;
+    background:rgba(255,255,255,.025);
+    border-bottom:1px solid rgba(255,255,255,.06);
+    border-radius:14px 14px 0 0;
+    cursor:grab;
+    touch-action:none;
+  }
+
+  .node-header:active{cursor:grabbing}
+
+  .node-type-dot{
+    width:10px;height:10px;border-radius:50%;flex:none;
+    box-shadow:0 0 0 3px rgba(255,255,255,.04);
+  }
+
+  .node-title{
+    flex:1;
+    font-weight:650;
+    font-size:13px;
+    letter-spacing:.01em;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  .node-delete{
+    width:24px;height:24px;
+    border:0;
+    border-radius:7px;
+    background:transparent;
+    color:#8e98aa;
+    cursor:pointer;
+  }
+  .node-delete:hover{background:rgba(255,255,255,.06);color:#fff}
+
+  .node-body{
+    padding:12px;
+  }
+
+  .text-node textarea{
+    width:100%;
+    min-height:95px;
+    resize:vertical;
+    border:1px solid #2a3040;
+    border-radius:10px;
+    background:#11141b;
+    color:var(--text);
+    padding:10px;
+    outline:none;
+    user-select:text;
+  }
+
+  .text-node textarea:focus{border-color:#5365c7}
+
+  .file-drop{
+    min-height:110px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    border:1px dashed #3c4457;
+    border-radius:10px;
+    background:#11141b;
+    color:var(--muted);
+    cursor:pointer;
+    overflow:hidden;
+    text-align:center;
+    padding:10px;
+  }
+
+  .image-node .node-body{padding:0;}
+  .image-drop{
+    min-height:120px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+    cursor:pointer;
+    color:var(--muted);
+    background:transparent;
+    border-radius:0 0 14px 14px;
+  }
+  .image-drop.empty{padding:18px; text-align:center;}
+  .image-drop img{
+    display:block;
+    width:100%;
+    height:auto;
+    max-height:360px;
+    object-fit:contain;
+    border-radius:0 0 14px 14px;
+  }
+
+  .file-name{
+    color:#dce3ef;
+    font-weight:600;
+    word-break:break-word;
+  }
+
+  .file-meta{
+    font-size:12px;
+    color:#7f8a9d;
+  }
+
+  .port{
+    position:absolute;
+    width:12px;
+    height:12px;
+    border-radius:50%;
+    top:50%;
+    border:1.5px solid rgba(255,255,255,.78);
+    box-shadow:0 0 0 3px rgba(0,0,0,.18);
+    cursor:crosshair;
+    touch-action:none;
+    z-index:4;
+    opacity:0;
+    transition:opacity .13s ease, scale .13s ease;
+    scale:.72;
+  }
+  .node:hover .port, .node.selected .port, .port:hover{opacity:1;scale:1;}
+  .port.connected{opacity:.72;scale:.6;}
+  .node:hover .port.connected, .node.selected .port.connected{opacity:1;scale:1;}
+
+/* While dragging a wire, expose every possible destination port.
+   The dot stays visually compact, but gets a larger invisible hit target. */
+.connecting .node .port{
+  opacity:1 !important;
+  scale:1 !important;
+  pointer-events:auto !important;
+}
+
+.connecting .node .port::after{
+  content:"";
+  position:absolute;
+  inset:-10px;
+  border-radius:50%;
+}
+
+  .port.input{left:-6px;transform:translateY(-50%)}
+  .port.output{right:-6px;transform:translateY(-50%)}
+  .port.top{top:-6px;left:50%;transform:translateX(-50%);}
+  .port.bottom{top:auto;bottom:-6px;left:50%;transform:translateX(-50%);}
+
+  .guide{
+    position:absolute;
+    z-index:3;
+    pointer-events:none;
+    display:none;
+    background:rgba(124,140,255,.9);
+    box-shadow:0 0 8px rgba(124,140,255,.35);
+  }
+  .guide.v{width:1px;top:-100000px;height:200000px;}
+  .guide.h{height:1px;left:-100000px;width:200000px;}
+
+  .toolbar{
+    position:absolute;
+    left:16px;
+    top:16px;
+    z-index:20;
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    padding:9px;
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:13px;
+    background:rgba(18,21,29,.88);
+    backdrop-filter:blur(14px);
+    box-shadow:0 10px 35px rgba(0,0,0,.25);
+  }
+
+  .toolbar button,.toolbar select{
+    border:1px solid #303748;
+    color:#e6ebf4;
+    background:#1a1f2a;
+    border-radius:9px;
+    padding:8px 11px;
+    cursor:pointer;
+  }
+
+  .toolbar button:hover{background:#222838}
+
+  .color-row{
+    display:flex;
+    gap:5px;
+    align-items:center;
+  }
+
+  .swatch{
+    width:24px!important;
+    height:24px!important;
+    padding:0!important;
+    border-radius:50%!important;
+    border:2px solid transparent!important;
+  }
+
+  .swatch.active{
+    border-color:white!important;
+    box-shadow:0 0 0 2px rgba(255,255,255,.14);
+  }
+
+  .hint{
+    position:absolute;
+    left:18px;
+    bottom:15px;
+    z-index:10;
+    color:#748095;
+    font-size:12px;
+    pointer-events:none;
+    background:rgba(15,17,23,.72);
+    padding:6px 9px;
+    border-radius:8px;
+  }
+
+  .zoom-box{
+    position:absolute;
+    right:16px;
+    bottom:16px;
+    z-index:20;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    padding:6px;
+    border-radius:11px;
+    border:1px solid rgba(255,255,255,.08);
+    background:rgba(18,21,29,.88);
+    backdrop-filter:blur(14px);
+  }
+
+  .zoom-box button{
+    width:34px;height:34px;border:1px solid #303748;border-radius:8px;
+    color:#e6ebf4;background:#1a1f2a;cursor:pointer;
+  }
+
+  .zoom-label{min-width:55px;text-align:center;color:#9ba5b8;font-size:12px}
+
+  .context-menu{
+    position:absolute;
+    z-index:100;
+    display:none;
+    min-width:170px;
+    padding:6px;
+    background:#181c26;
+    border:1px solid #303748;
+    border-radius:10px;
+    box-shadow:0 12px 40px rgba(0,0,0,.4);
+  }
+
+  .context-menu button{
+    width:100%;
+    text-align:left;
+    padding:9px 10px;
+    border:0;
+    border-radius:7px;
+    color:#e8ecf3;
+    background:transparent;
+    cursor:pointer;
+  }
+  .context-menu button:hover{background:#222838}
+
+  @media(max-width:700px){
+    .toolbar{right:16px}
+    .toolbar button,.toolbar select{padding:8px 9px}
+    .hint{display:none}
+    .node{width:230px}
+  }
+
+  .node.image-node{
+    background:transparent !important;
+    border:none !important;
+    box-shadow:none !important;
+    border-radius:0 !important;
+    min-height:0;
+    overflow:visible;
+  }
+
+  .node.image-node.selected{
+    outline:none !important;
+  }
+
+  .node.image-node .node-body{
+    padding:0 !important;
+  }
+
+  .node.image-node .image-drop{
+    min-height:120px;
+    border:none !important;
+    background:transparent !important;
+    border-radius:0 !important;
+    padding:0 !important;
+    cursor:grab;
+    overflow:visible;
+    color:#8f98aa;
+    user-select:none;
+    touch-action:none;
+  }
+
+  .node.image-node .image-drop:active{
+    cursor:grabbing;
+  }
+
+  .node.image-node .image-drop img{
+    display:block;
+    width:100%;
+    height:auto;
+    max-height:none;
+    object-fit:contain;
+    border-radius:0;
+    pointer-events:none;
+    user-select:none;
+  }
+
+  .node.image-node .image-delete{
+    position:absolute;
+    right:-8px;
+    top:-8px;
+    width:22px;
+    height:22px;
+    border:1px solid rgba(255,255,255,.14);
+    border-radius:50%;
+    background:rgba(15,17,23,.9);
+    color:#c7ceda;
+    opacity:0;
+    pointer-events:none;
+    z-index:8;
+    cursor:pointer;
+  }
+
+  .node.image-node:hover .image-delete,
+  .node.image-node.selected .image-delete{
+    opacity:1;
+    pointer-events:auto;
+  }
+
+  .node.image-node.empty-image{
+    width:220px;
+  }
+
+  .node.image-node.empty-image .image-drop{
+    min-height:120px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    padding:12px !important;
+  }
+
+
+  /* Frameless image objects */
+  .node.image-node{
+    background:transparent !important;
+    border:none !important;
+    box-shadow:none !important;
+    border-radius:0 !important;
+    min-height:0 !important;
+    overflow:visible !important;
+    width:auto;
+  }
+
+  .node.image-node.selected{
+    outline:none !important;
+  }
+
+  .node.image-node .node-body{
+    padding:0 !important;
+  }
+
+  .node.image-node .image-object{
+    display:block;
+    cursor:grab;
+    user-select:none;
+    -webkit-user-drag:none;
+    touch-action:none;
+    max-width:none;
+    max-height:none;
+    object-fit:contain;
+  }
+
+  .node.image-node .image-object:active{
+    cursor:grabbing;
+  }
+
+  /* "Border" mode = rounded image shape only; no extra panel, outline, padding, or shadow. */
+  .node.image-node.has-image-border{
+    background:transparent !important;
+    border:none !important;
+    border-radius:14px !important;
+    box-shadow:none !important;
+    padding:0 !important;
+    overflow:visible !important;
+  }
+
+  .node.image-node.has-image-border .node-body{
+    width:100%;
+    height:100%;
+    border-radius:14px;
+    overflow:hidden;
+  }
+
+  .node.image-node.has-image-border .image-object{
+    border-radius:14px;
+  }
+
+  /* In rounded mode, the selected resize frame follows the same rounded image edge. */
+  .node.image-node.has-image-border .image-resize-frame{
+    border-radius:14px;
+  }
+
+  .context-menu .menu-separator{
+    height:1px;
+    background:#2d3443;
+    margin:5px 4px;
+  }
+
+  .context-menu .menu-label{
+    padding:7px 10px 4px;
+    color:#7f899c;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.07em;
+  }
+
+
+  .node.image-node .node-body{
+    position:relative;
+    width:100%;
+    height:100%;
+  }
+
+  .node.image-node .image-object{
+    display:block;
+    width:100% !important;
+    height:100% !important;
+    max-width:none !important;
+    max-height:none !important;
+    object-fit:fill;
+  }
+
+  .image-resize-frame{
+    position:absolute;
+    inset:0;
+    border:1px solid rgba(124,140,255,.95);
+    pointer-events:none;
+    opacity:0;
+    z-index:7;
+  }
+
+  .node.image-node.selected .image-resize-frame{opacity:1}
+
+  .resize-handle{
+    position:absolute;
+    width:10px;
+    height:10px;
+    border-radius:2px;
+    background:#eef1ff;
+    border:1px solid #5967b7;
+    z-index:9;
+    opacity:0;
+    pointer-events:none;
+  }
+
+  .node.image-node.selected .resize-handle{
+    opacity:1;
+    pointer-events:auto;
+  }
+
+  .resize-handle.nw{left:-5px;top:-5px;cursor:nwse-resize}
+  .resize-handle.n{left:50%;top:-5px;transform:translateX(-50%);cursor:ns-resize}
+  .resize-handle.ne{right:-5px;top:-5px;cursor:nesw-resize}
+  .resize-handle.e{right:-5px;top:50%;transform:translateY(-50%);cursor:ew-resize}
+  .resize-handle.se{right:-5px;bottom:-5px;cursor:nwse-resize}
+  .resize-handle.s{left:50%;bottom:-5px;transform:translateX(-50%);cursor:ns-resize}
+  .resize-handle.sw{left:-5px;bottom:-5px;cursor:nesw-resize}
+  .resize-handle.w{left:-5px;top:50%;transform:translateY(-50%);cursor:ew-resize}
+
+
+  .snap-toggle{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:6px 9px;
+    margin:0 3px;
+    font-size:12px;
+    color:#cfd6e6;
+    user-select:none;
+    white-space:nowrap;
+    border:1px solid #343b4d;
+    border-radius:8px;
+    background:rgba(19,22,30,.72);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
+  }
+
+  .snap-toggle input{
+    display:none;
+  }
+
+  .snap-toggle-track{
+    width:34px;
+    height:18px;
+    border-radius:999px;
+    background:#343b4d;
+    border:1px solid #454e64;
+    position:relative;
+    transition:.15s ease;
+    flex:0 0 auto;
+  }
+
+  .snap-toggle-track::after{
+    content:"";
+    position:absolute;
+    width:12px;
+    height:12px;
+    left:2px;
+    top:2px;
+    border-radius:50%;
+    background:#aab3c6;
+    transition:.15s ease;
+  }
+
+  .snap-toggle input:checked + .snap-toggle-track{
+    background:#5967b7;
+    border-color:#7482d3;
+  }
+
+  .snap-toggle input:checked + .snap-toggle-track::after{
+    transform:translateX(16px);
+    background:#fff;
+  }
+
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="workspace">
+    <svg id="connections"></svg>
+    <div id="guideV" class="guide v"></div>
+    <div id="guideH" class="guide h"></div>
+    <div id="nodes"></div>
+  </div>
+
+  <div class="toolbar">
+    <button data-add="text">+ Text</button>
+    <button data-add="image">+ Image</button>
+    <button data-add="file">+ File</button>
+    <div class="color-row" title="Connection color">
+      <button class="swatch active" data-color="#7c8cff" style="background:#7c8cff"></button>
+      <button class="swatch" data-color="#61d095" style="background:#61d095"></button>
+      <button class="swatch" data-color="#ffbf69" style="background:#ffbf69"></button>
+      <button class="swatch" data-color="#ff6b8a" style="background:#ff6b8a"></button>
+      <button class="swatch" data-color="#b77cff" style="background:#b77cff"></button>
+      <button class="swatch" data-color="#5fd3ff" style="background:#5fd3ff"></button>
+    </div>
+    <label class="snap-toggle" title="Toggle snapping and alignment guides">
+      <input id="snapToggle" type="checkbox" checked>
+      <span class="snap-toggle-track"></span>
+      <span>Snapping</span>
+    </label>
+    <button id="saveBtn">Save</button>
+    <button id="loadBtn">Load</button>
+    <button id="clearBtn">Clear</button>
+  </div>
+
+  <div class="zoom-box">
+    <button id="zoomOut">−</button>
+    <div class="zoom-label" id="zoomLabel">100%</div>
+    <button id="zoomIn">+</button>
+    <button id="zoomReset">1:1</button>
+  </div>
+
+  <div class="hint">Drag empty canvas to pan · Scroll to zoom · Drop images directly onto canvas · Nodes magnet-snap with alignment guides · Hover a node for connection dots</div>
+
+  <div id="contextMenu" class="context-menu">
+    <button data-ctx="text">Add text node</button>
+    <button data-ctx="image">Add image</button>
+    <button data-ctx="file">Add file node</button>
+  </div>
+
+  <input id="imagePicker" type="file" accept="image/*" hidden>
+  <input id="filePicker" type="file" hidden>
+  <input id="boardFilePicker" type="file" accept=".workflow,.json,application/json" hidden>
+</div>
+
+<script>
+(() => {
+  const app = document.getElementById('app');
+  const workspace = document.getElementById('workspace');
+  const nodeLayer = document.getElementById('nodes');
+  const svg = document.getElementById('connections');
+  const contextMenu = document.getElementById('contextMenu');
+  const zoomLabel = document.getElementById('zoomLabel');
+  const imagePicker = document.getElementById('imagePicker');
+  const filePicker = document.getElementById('filePicker');
+  const boardFilePicker = document.getElementById('boardFilePicker');
+  let currentBoardFileHandle = null;
+  let currentBoardFileName = 'workflow.workflow';
+  const guideV = document.getElementById('guideV');
+  const guideH = document.getElementById('guideH');
+
+  const state = {
+    nodes: [],
+    connections: [],
+    nextId: 1,
+    panX: 0,
+    panY: 0,
+    scale: 1,
+    connectColor: '#7c8cff',
+    draggingConnection: null,
+    pendingUploadNode: null,
+    snapEnabled: true
+  };
+
+  const colors = {
+    text: '#7c8cff',
+    image: '#61d095',
+    file: '#ffbf69'
+  };
+
+  function screenToWorld(x, y) {
+    const rect = app.getBoundingClientRect();
+    return {
+      x: (x - rect.left - state.panX) / state.scale,
+      y: (y - rect.top - state.panY) / state.scale
+    };
+  }
+
+  function worldToScreen(x, y) {
+    const rect = app.getBoundingClientRect();
+    return {
+      x: rect.left + state.panX + x * state.scale,
+      y: rect.top + state.panY + y * state.scale
+    };
+  }
+
+  function applyTransform() {
+    workspace.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.scale})`;
+    app.style.backgroundPosition = `${state.panX % (24*state.scale)}px ${state.panY % (24*state.scale)}px`;
+    app.style.backgroundSize = `${24*state.scale}px ${24*state.scale}px`;
+    zoomLabel.textContent = `${Math.round(state.scale * 100)}%`;
+    renderConnections();
+  }
+
+  function nodeById(id) {
+    return state.nodes.find(n => n.id === id);
+  }
+
+  function addNode(type, x, y, data = {}) {
+    const id = state.nextId++;
+    const node = {
+      id,
+      type,
+      x: x ?? (120 + state.nodes.length * 25),
+      y: y ?? (120 + state.nodes.length * 20),
+      title: data.title !== undefined ? data.title : ({text:'Text', image:'', file:'File'}[type]),
+      text: data.text || '',
+      image: data.image || null,
+      imageWidth: data.imageWidth || 260,
+      imageHeight: data.imageHeight || null,
+      imageNaturalWidth: data.imageNaturalWidth || null,
+      imageNaturalHeight: data.imageNaturalHeight || null,
+      imageBorder: !!data.imageBorder,
+      fileName: data.fileName || '',
+      fileSize: data.fileSize || '',
+      portColor: data.portColor || state.connectColor
+    };
+    state.nodes.push(node);
+    createNodeElement(node);
+    renderConnections();
+    return node;
+  }
+
+  function createNodeElement(node) {
+    const el = document.createElement('div');
+    el.className = `node ${node.type}-node`;
+    el.dataset.id = node.id;
+    el.style.left = node.x + 'px';
+    el.style.top = node.y + 'px';
+
+    /* Images are standalone canvas objects. */
+    if (node.type === 'image') {
+      if (node.imageBorder) el.classList.add('has-image-border');
+
+      const body = document.createElement('div');
+      body.className = 'node-body';
+
+      const img = document.createElement('img');
+      img.className = 'image-object';
+      img.src = node.image || '';
+      img.alt = '';
+      img.draggable = false;
+
+      const resizeFrame = document.createElement('div');
+      resizeFrame.className = 'image-resize-frame';
+
+      const handles = ['nw','n','ne','e','se','s','sw','w'].map(name => {
+        const h = document.createElement('div');
+        h.className = `resize-handle ${name}`;
+        h.dataset.handle = name;
+        return h;
+      });
+
+      body.append(img);
+
+      const inPort = makePort(node, 'input');
+      const outPort = makePort(node, 'output');
+      const topPort = makePort(node, 'top');
+      const bottomPort = makePort(node, 'bottom');
+
+      // Resize UI belongs to the outer object, not the image itself.
+      el.append(body, resizeFrame, ...handles, inPort, outPort, topPort, bottomPort);
+      nodeLayer.appendChild(el);
+
+      const applyImageSize = () => {
+        const nw = img.naturalWidth || node.imageNaturalWidth || 260;
+        const nh = img.naturalHeight || node.imageNaturalHeight || 180;
+        node.imageNaturalWidth = nw;
+        node.imageNaturalHeight = nh;
+
+        if (!node.imageWidth) node.imageWidth = 260;
+        if (!node.imageHeight) node.imageHeight = Math.max(40, node.imageWidth * nh / nw);
+
+        el.style.width = node.imageWidth + 'px';
+        el.style.height = node.imageHeight + 'px';
+        body.style.width = '100%';
+        body.style.height = '100%';
+        renderConnections();
+      };
+
+      img.addEventListener('load', applyImageSize);
+      if (img.complete && img.naturalWidth) applyImageSize();
+
+      makeNodeDraggable(el, img, node, true);
+      setupImageResize(el, node, handles);
+
+      el.addEventListener('pointerdown', e => {
+        if (!e.target.closest('.port,.resize-handle')) selectNode(node.id);
+      });
+
+      img.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        selectNode(node.id);
+        showImageContextMenu(node.id, e.clientX, e.clientY);
+      });
+
+      requestAnimationFrame(renderConnections);
+      return;
+    }
+
+    const header = document.createElement('div');
+    header.className = 'node-header';
+
+    const dot = document.createElement('div');
+    dot.className = 'node-type-dot';
+    dot.style.background = colors[node.type];
+
+    const title = document.createElement('div');
+    title.className = 'node-title';
+    title.textContent = node.title;
+    title.ondblclick = (e) => {
+      e.stopPropagation();
+      const v = prompt('Node title:', node.title);
+      if (v !== null && v.trim()) {
+        node.title = v.trim();
+        title.textContent = node.title;
+      }
+    };
+
+    const del = document.createElement('button');
+    del.className = 'node-delete';
+    del.textContent = '×';
+    del.title = 'Delete node';
+    del.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    del.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      deleteNode(node.id);
+    });
+
+    header.append(dot, title, del);
+
+    const body = document.createElement('div');
+    body.className = 'node-body';
+
+    if (node.type === 'text') {
+      const ta = document.createElement('textarea');
+      ta.placeholder = 'Type notes, ideas, prompts, links...';
+      ta.value = node.text;
+      ta.addEventListener('input', () => node.text = ta.value);
+      ta.addEventListener('pointerdown', e => e.stopPropagation());
+      body.appendChild(ta);
+    }
+
+    if (node.type === 'file') {
+      const drop = document.createElement('div');
+      drop.className = 'file-drop';
+      updateFileNode(drop, node);
+      drop.addEventListener('click', (e) => {
+        e.stopPropagation();
+        state.pendingUploadNode = node.id;
+        filePicker.click();
+      });
+      drop.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
+      drop.addEventListener('drop', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const f = e.dataTransfer.files[0];
+        if (f) attachFile(node.id, f);
+      });
+      body.appendChild(drop);
+    }
+
+    const inPort = makePort(node, 'input');
+    const outPort = makePort(node, 'output');
+    const topPort = makePort(node, 'top');
+    const bottomPort = makePort(node, 'bottom');
+
+    el.append(header, body, inPort, outPort, topPort, bottomPort);
+    nodeLayer.appendChild(el);
+
+    makeNodeDraggable(el, header, node);
+    el.addEventListener('pointerdown', () => selectNode(node.id));
+    requestAnimationFrame(renderConnections);
+  }
+
+  function setupImageResize(el, node, handles) {
+    const MIN_W = 60;
+    const MIN_H = 40;
+
+    handles.forEach(handle => {
+      handle.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const dir = handle.dataset.handle;
+        const sx = e.clientX;
+        const sy = e.clientY;
+        const sw = node.imageWidth || el.offsetWidth || 260;
+        const sh = node.imageHeight || el.offsetHeight || 180;
+        const sxNode = node.x;
+        const syNode = node.y;
+        const ratio = sw / Math.max(1, sh);
+
+        handle.setPointerCapture?.(e.pointerId);
+
+        const move = ev => {
+          const dx = (ev.clientX - sx) / state.scale;
+          const dy = (ev.clientY - sy) / state.scale;
+
+          let w = sw, h = sh, x = sxNode, y = syNode;
+          const corner = dir.length === 2;
+
+          if (corner) {
+            let cw = dir.includes('e') ? sw + dx : sw - dx;
+            let ch = dir.includes('s') ? sh + dy : sh - dy;
+
+            if (Math.abs(dx) >= Math.abs(dy * ratio)) {
+              w = Math.max(MIN_W, cw);
+              h = Math.max(MIN_H, w / ratio);
+            } else {
+              h = Math.max(MIN_H, ch);
+              w = Math.max(MIN_W, h * ratio);
+            }
+
+            if (dir.includes('w')) x = sxNode + (sw - w);
+            if (dir.includes('n')) y = syNode + (sh - h);
+          } else {
+            if (dir === 'e') w = Math.max(MIN_W, sw + dx);
+            if (dir === 'w') {
+              w = Math.max(MIN_W, sw - dx);
+              x = sxNode + (sw - w);
+            }
+            if (dir === 's') h = Math.max(MIN_H, sh + dy);
+            if (dir === 'n') {
+              h = Math.max(MIN_H, sh - dy);
+              y = syNode + (sh - h);
+            }
+          }
+
+          node.imageWidth = w;
+          node.imageHeight = h;
+          node.x = x;
+          node.y = y;
+
+          el.style.left = x + 'px';
+          el.style.top = y + 'px';
+          el.style.width = w + 'px';
+          el.style.height = h + 'px';
+          renderConnections();
+        };
+
+        const stop = () => {
+          handle.removeEventListener('pointermove', move);
+          handle.removeEventListener('pointerup', stop);
+          handle.removeEventListener('pointercancel', stop);
+        };
+
+        handle.addEventListener('pointermove', move);
+        handle.addEventListener('pointerup', stop);
+        handle.addEventListener('pointercancel', stop);
+      });
+    });
+  }
+
+  function makePort(node, kind) {
+    const p = document.createElement('div');
+    p.className = `port ${kind}`;
+    p.dataset.node = node.id;
+    p.dataset.kind = kind;
+    p.style.background = node.portColor;
+
+    p.addEventListener('pointerdown', e => {
+      e.stopPropagation();
+      e.preventDefault();
+      const pt = portWorldPosition(p);
+      state.draggingConnection = {
+        fromNode: node.id,
+        fromKind: kind,
+        startX: pt.x,
+        startY: pt.y,
+        currentX: pt.x,
+        currentY: pt.y,
+        color: state.connectColor,
+        pointerId: e.pointerId
+      };
+      app.classList.add('connecting');
+      renderConnections();
+    });
+
+    p.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const nodeId = Number(p.dataset.node);
+      const portKind = p.dataset.kind;
+
+      state.connections = state.connections.filter(c => {
+        const fromKind = c.fromKind || 'output';
+        const toKind = c.toKind || 'input';
+        return !(
+          (c.from === nodeId && fromKind === portKind) ||
+          (c.to === nodeId && toKind === portKind)
+        );
+      });
+
+      renderConnections();
+    });
+
+    return p;
+  }
+
+  function portWorldPosition(port) {
+    const r = port.getBoundingClientRect();
+    const ar = app.getBoundingClientRect();
+    return {
+      x: ((r.left + r.width/2) - ar.left - state.panX) / state.scale,
+      y: ((r.top + r.height/2) - ar.top - state.panY) / state.scale
+    };
+  }
+
+  function getNodePort(nodeId, kind) {
+    return nodeLayer.querySelector(`.port[data-node="${nodeId}"][data-kind="${kind}"]`);
+  }
+
+  function addConnection(from, to, color, fromKind='output', toKind='input') {
+    const exists = state.connections.some(c => c.from === from && c.to === to && c.fromKind === fromKind && c.toKind === toKind);
+    if (!exists) state.connections.push({id: crypto.randomUUID?.() || Math.random().toString(36).slice(2), from, to, color, fromKind, toKind});
+    renderConnections();
+  }
+
+  function wirePath(a, b, fromKind='output', toKind='input') {
+    const dist = Math.max(80, Math.hypot(b.x-a.x,b.y-a.y)*.35);
+    const vec = (kind) => {
+      if (kind === 'input') return {x:-1,y:0};
+      if (kind === 'output') return {x:1,y:0};
+      if (kind === 'top') return {x:0,y:-1};
+      return {x:0,y:1};
+    };
+    const va = vec(fromKind), vb = vec(toKind);
+    return `M ${a.x} ${a.y} C ${a.x + va.x*dist} ${a.y + va.y*dist}, ${b.x + vb.x*dist} ${b.y + vb.y*dist}, ${b.x} ${b.y}`;
+  }
+
+  function renderConnections() {
+    svg.innerHTML = '';
+    nodeLayer.querySelectorAll('.port').forEach(p => p.classList.remove('connected'));
+    for (const c of state.connections) {
+      const p1 = getNodePort(c.from, c.fromKind || 'output');
+      const p2 = getNodePort(c.to, c.toKind || 'input');
+      if (!p1 || !p2) continue;
+      const a = portWorldPosition(p1);
+      const b = portWorldPosition(p2);
+      p1.classList.add('connected');
+      p2.classList.add('connected');
+      const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+      path.setAttribute('d', wirePath(a,b,c.fromKind || 'output',c.toKind || 'input'));
+      path.setAttribute('stroke', c.color);
+      path.setAttribute('class','wire');
+      path.style.pointerEvents = 'stroke';
+      path.addEventListener('dblclick', () => {
+        state.connections = state.connections.filter(x => x.id !== c.id);
+        renderConnections();
+      });
+      svg.appendChild(path);
+    }
+
+    if (state.draggingConnection) {
+      const d = state.draggingConnection;
+      const a = {x:d.startX,y:d.startY};
+      const b = {x:d.currentX,y:d.currentY};
+      const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+      path.setAttribute('d', wirePath(a,b,d.fromKind,'input'));
+      path.setAttribute('stroke', d.color);
+      path.setAttribute('class','wire');
+      svg.appendChild(path);
+    }
+  }
+
+  function hideGuides(){
+    guideV.style.display='none';
+    guideH.style.display='none';
+  }
+
+  function snapNodePosition(node, el, x, y){
+    
+    if (!state.snapEnabled) {
+      hideGuides();
+      return { x: targetX, y: targetY };
+    }
+
+if (!state.snapEnabled) return {x,y};
+    const threshold = 9 / state.scale;
+    const gap = 16;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    let bestX = null, bestY = null;
+    let bestDX = threshold + 1, bestDY = threshold + 1;
+    let guideX = null, guideY = null;
+
+    const myX = [
+      {v:x, offset:0},
+      {v:x+w/2, offset:w/2},
+      {v:x+w, offset:w}
+    ];
+    const myY = [
+      {v:y, offset:0},
+      {v:y+h/2, offset:h/2},
+      {v:y+h, offset:h}
+    ];
+
+    for (const other of state.nodes) {
+      if (other.id === node.id) continue;
+      const oel = nodeLayer.querySelector(`.node[data-id="${other.id}"]`);
+      if (!oel) continue;
+      const ow = oel.offsetWidth, oh = oel.offsetHeight;
+      const ox = other.x, oy = other.y;
+      const targetsX = [ox, ox+ow/2, ox+ow];
+      const targetsY = [oy, oy+oh/2, oy+oh];
+
+      for (const m of myX) for (const t of targetsX) {
+        const d = Math.abs(m.v - t);
+        if (d < bestDX && d <= threshold) { bestDX=d; bestX=t-m.offset; guideX=t; }
+      }
+      for (const m of myY) for (const t of targetsY) {
+        const d = Math.abs(m.v - t);
+        if (d < bestDY && d <= threshold) { bestDY=d; bestY=t-m.offset; guideY=t; }
+      }
+
+      const gapXTargets = [ox - gap - w, ox + ow + gap];
+      for (const gx of gapXTargets) {
+        const d=Math.abs(x-gx);
+        if (d < bestDX && d <= threshold) {
+          bestDX=d; bestX=gx;
+          guideX = gx < ox ? ox : ox+ow;
+        }
+      }
+      const gapYTargets = [oy - gap - h, oy + oh + gap];
+      for (const gy of gapYTargets) {
+        const d=Math.abs(y-gy);
+        if (d < bestDY && d <= threshold) {
+          bestDY=d; bestY=gy;
+          guideY = gy < oy ? oy : oy+oh;
+        }
+      }
+    }
+
+    if (bestX !== null) {
+      x = bestX;
+      guideV.style.left = guideX + 'px';
+      guideV.style.display = 'block';
+    } else guideV.style.display='none';
+
+    if (bestY !== null) {
+      y = bestY;
+      guideH.style.top = guideY + 'px';
+      guideH.style.display = 'block';
+    } else guideH.style.display='none';
+
+    return {x,y};
+  }
+
+  function makeNodeDraggable(el, handle, node, isImage = false) {
+    let drag = null;
+    handle.addEventListener('pointerdown', e => {
+      if (e.button !== undefined && e.button !== 0) return;
+      if (e.target.closest('.image-delete')) return;
+      e.stopPropagation();
+
+      if (!isImage) e.preventDefault();
+
+      handle.setPointerCapture?.(e.pointerId);
+      const pt = screenToWorld(e.clientX,e.clientY);
+      drag = {
+        dx:pt.x-node.x,
+        dy:pt.y-node.y,
+        pointerId:e.pointerId,
+        startClientX:e.clientX,
+        startClientY:e.clientY,
+        moved:false
+      };
+      selectNode(node.id);
+    });
+
+    handle.addEventListener('pointermove', e => {
+      if (!drag) return;
+      const pt = screenToWorld(e.clientX,e.clientY);
+      let next = state.snapEnabled
+        ? snapNodePosition(node, el, pt.x - drag.dx, pt.y - drag.dy)
+        : { x: pt.x - drag.dx, y: pt.y - drag.dy };
+      if (!state.snapEnabled) hideGuides();
+      node.x = next.x;
+      node.y = next.y;
+      el.style.left = node.x + 'px';
+      el.style.top = node.y + 'px';
+      renderConnections();
+    });
+
+    const stop = () => { drag = null; hideGuides(); };
+    handle.addEventListener('pointerup', stop);
+    handle.addEventListener('pointercancel', stop);
+  }
+
+  function selectNode(id) {
+    nodeLayer.querySelectorAll('.node').forEach(n => {
+      n.classList.toggle('selected', id !== null && Number(n.dataset.id) === id);
+    });
+  }
+
+  function deleteNode(id) {
+    state.nodes = state.nodes.filter(n => n.id !== id);
+    state.connections = state.connections.filter(c => c.from !== id && c.to !== id);
+    nodeLayer.querySelector(`.node[data-id="${id}"]`)?.remove();
+    if (typeof refreshConnectedPorts === 'function') refreshConnectedPorts();
+    renderConnections();
+  }
+
+  function updateImageNode(drop, node) {
+    drop.innerHTML = '';
+    drop.classList.toggle('empty', !node.image);
+    if (node.image) {
+      const img = document.createElement('img');
+      img.src = node.image;
+      img.alt = node.title || 'Image';
+      drop.appendChild(img);
+    } else {
+      drop.innerHTML = `<div><div style="font-size:26px;margin-bottom:6px">🖼️</div><div>Drop an image here or click to choose</div></div>`;
+    }
+  }
+
+  function readImageForNode(nodeId, file) {
+    const node = nodeById(nodeId);
+    if (!node) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      node.image = reader.result;
+      const oldEl = nodeLayer.querySelector(`.node[data-id="${nodeId}"]`);
+      oldEl?.remove();
+      createNodeElement(node);
+      renderConnections();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function updateFileNode(drop, node) {
+    drop.innerHTML = node.fileName
+      ? `<div style="font-size:26px">📎</div><div class="file-name">${escapeHtml(node.fileName)}</div><div class="file-meta">${escapeHtml(node.fileSize)}</div><div class="file-meta">Click to replace</div>`
+      : `<div style="font-size:28px">📄</div><div>Click or drop a file</div>`;
+  }
+
+  function attachFile(nodeId, file) {
+    const node = nodeById(nodeId);
+    if (!node) return;
+    node.fileName = file.name;
+    node.fileSize = formatBytes(file.size);
+    const drop = nodeLayer.querySelector(`.node[data-id="${nodeId}"] .file-drop`);
+    updateFileNode(drop,node);
+  }
+
+  function formatBytes(bytes) {
+    if (!bytes) return '0 B';
+    const units = ['B','KB','MB','GB'];
+    const i = Math.min(Math.floor(Math.log(bytes)/Math.log(1024)), units.length-1);
+    return `${(bytes/Math.pow(1024,i)).toFixed(i ? 1 : 0)} ${units[i]}`;
+  }
+
+  function escapeHtml(s='') {
+    return s.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+
+
+  app.addEventListener('dragover', e => {
+    if ([...e.dataTransfer.types].includes('Files')) e.preventDefault();
+  });
+
+  app.addEventListener('drop', e => {
+    if (e.target.closest('.image-drop,.file-drop')) return;
+    const files = [...e.dataTransfer.files];
+    const img = files.find(f => f.type.startsWith('image/'));
+    if (!img) return;
+    e.preventDefault();
+    state.draggingConnection = null;
+    app.classList.remove('connecting');
+    const p = screenToWorld(e.clientX,e.clientY);
+    const n = addNode('image', p.x-130, p.y-70);
+    readImageForNode(n.id,img);
+  });
+
+  imagePicker.addEventListener('change', () => {
+    const f = imagePicker.files[0];
+    if (f) {
+      if (state.pendingUploadNode) {
+        readImageForNode(state.pendingUploadNode,f);
+      } else {
+        state.draggingConnection = null;
+        app.classList.remove('connecting');
+        const center = screenToWorld(innerWidth/2, innerHeight/2);
+        const node = addNode('image', center.x - 130, center.y - 90);
+        readImageForNode(node.id, f);
+      }
+    }
+    state.pendingUploadNode = null;
+    imagePicker.value = '';
+  });
+
+  filePicker.addEventListener('change', () => {
+    const f = filePicker.files[0];
+    if (f && state.pendingUploadNode) attachFile(state.pendingUploadNode,f);
+    filePicker.value = '';
+  });
+
+  nodeLayer.addEventListener('pointermove', e => {
+    if (!state.draggingConnection) return;
+    const pt = screenToWorld(e.clientX,e.clientY);
+    state.draggingConnection.currentX = pt.x;
+    state.draggingConnection.currentY = pt.y;
+    renderConnections();
+  });
+
+  app.addEventListener('pointermove', e => {
+    if (!state.draggingConnection) return;
+    const pt = screenToWorld(e.clientX,e.clientY);
+    state.draggingConnection.currentX = pt.x;
+    state.draggingConnection.currentY = pt.y;
+    renderConnections();
+  });
+
+  app.addEventListener('pointerup', e => {
+    if (state.draggingConnection) {
+      let target = document.elementFromPoint(e.clientX,e.clientY)?.closest?.('.port');
+
+      // Give ports a forgiving magnetic hit area while connecting.
+      if (!target) {
+        const nodeEl = document.elementFromPoint(e.clientX,e.clientY)?.closest?.('.node');
+        if (nodeEl && Number(nodeEl.dataset.id) !== state.draggingConnection.fromNode) {
+          let best = null;
+          let bestDist = 28;
+          nodeEl.querySelectorAll('.port').forEach(port => {
+            const r = port.getBoundingClientRect();
+            const cx = r.left + r.width / 2;
+            const cy = r.top + r.height / 2;
+            const dist = Math.hypot(e.clientX - cx, e.clientY - cy);
+            if (dist < bestDist) {
+              bestDist = dist;
+              best = port;
+            }
+          });
+          target = best;
+        }
+      }
+
+      if (target) {
+        const targetNode = Number(target.dataset.node);
+        const targetKind = target.dataset.kind;
+        const from = state.draggingConnection;
+        if (from.fromNode !== targetNode) {
+          addConnection(from.fromNode,targetNode,from.color,from.fromKind,targetKind);
+        }
+      }
+      state.draggingConnection = null;
+      app.classList.remove('connecting');
+      renderConnections();
+    }
+  });
+
+  // canvas pan
+  let panDrag = null;
+  app.addEventListener('pointerdown', e => {
+    if (e.target.closest('.node,.toolbar,.zoom-box,.context-menu')) return;
+    if (e.button !== undefined && e.button !== 0) return;
+    contextMenu.style.display = 'none';
+    selectNode(null);
+    panDrag = {x:e.clientX, y:e.clientY, px:state.panX, py:state.panY, pointerId:e.pointerId};
+    app.setPointerCapture?.(e.pointerId);
+  });
+
+  app.addEventListener('pointermove', e => {
+    if (!panDrag) return;
+    state.panX = panDrag.px + (e.clientX - panDrag.x);
+    state.panY = panDrag.py + (e.clientY - panDrag.y);
+    applyTransform();
+  });
+
+  app.addEventListener('pointerup', () => panDrag = null);
+  app.addEventListener('pointercancel', () => panDrag = null);
+
+  // zoom toward cursor
+  app.addEventListener('wheel', e => {
+    if (e.target.closest('textarea')) return;
+    e.preventDefault();
+    const old = state.scale;
+    const factor = Math.exp(-e.deltaY * .0012);
+    const next = Math.max(.35, Math.min(2.5, old * factor));
+    const rect = app.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const wx = (mx - state.panX)/old;
+    const wy = (my - state.panY)/old;
+    state.scale = next;
+    state.panX = mx - wx*next;
+    state.panY = my - wy*next;
+    applyTransform();
+  }, {passive:false});
+
+  function setZoom(next) {
+    const rect = app.getBoundingClientRect();
+    const cx = rect.width/2, cy = rect.height/2;
+    const old = state.scale;
+    const wx = (cx-state.panX)/old, wy = (cy-state.panY)/old;
+    state.scale = Math.max(.35,Math.min(2.5,next));
+    state.panX = cx-wx*state.scale;
+    state.panY = cy-wy*state.scale;
+    applyTransform();
+  }
+
+  document.getElementById('zoomIn').onclick = () => setZoom(state.scale*1.2);
+  document.getElementById('zoomOut').onclick = () => setZoom(state.scale/1.2);
+  document.getElementById('zoomReset').onclick = () => {state.scale=1;state.panX=0;state.panY=0;applyTransform()};
+
+  document.querySelectorAll('[data-add]').forEach(btn => btn.onclick = () => {
+    if (btn.dataset.add === 'image') {
+      state.pendingUploadNode = null;
+      imagePicker.click();
+      return;
+    }
+    const center = screenToWorld(innerWidth/2,innerHeight/2);
+    addNode(btn.dataset.add, center.x-130 + Math.random()*30, center.y-70 + Math.random()*30);
+  });
+
+  document.querySelectorAll('.swatch').forEach(btn => btn.onclick = () => {
+    state.connectColor = btn.dataset.color;
+    document.querySelectorAll('.swatch').forEach(x=>x.classList.toggle('active',x===btn));
+  });
+
+  app.addEventListener('dblclick', e => {
+    if (e.target.closest('.node,.toolbar,.zoom-box')) return;
+    const p = screenToWorld(e.clientX,e.clientY);
+    addNode('text',p.x-130,p.y-40);
+  });
+
+  function rebuildCanvasContextMenu() {
+    contextMenu.innerHTML = `
+      <button data-ctx="text">Add text node</button>
+      <button data-ctx="image">Add image</button>
+      <button data-ctx="file">Add file node</button>
+    `;
+
+    contextMenu.querySelectorAll('[data-ctx]').forEach(btn => btn.onclick = () => {
+      if (btn.dataset.ctx === 'image') {
+        state.pendingUploadNode = null;
+        imagePicker.click();
+        contextMenu.style.display='none';
+        return;
+      }
+      const p = screenToWorld(Number(contextMenu.dataset.x), Number(contextMenu.dataset.y));
+      addNode(btn.dataset.ctx,p.x,p.y);
+      contextMenu.style.display='none';
+    });
+  }
+
+  function showImageContextMenu(nodeId, clientX, clientY) {
+    const node = nodeById(nodeId);
+    if (!node) return;
+
+    contextMenu.innerHTML = `
+      <button data-img-action="delete">Delete image</button>
+      <button data-img-action="reset-size">Reset size</button>
+      <button data-img-action="border">${node.imageBorder ? 'Remove rounded corners' : 'Add rounded corners'}</button>
+    `;
+
+    contextMenu.style.left = `${clientX}px`;
+    contextMenu.style.top = `${clientY}px`;
+    contextMenu.style.display = 'block';
+
+    contextMenu.querySelector('[data-img-action="delete"]').onclick = () => {
+      deleteNode(nodeId);
+      contextMenu.style.display = 'none';
+    };
+
+    contextMenu.querySelector('[data-img-action="reset-size"]').onclick = () => {
+      const el = nodeLayer.querySelector(`.node[data-id="${nodeId}"]`);
+      const img = el?.querySelector('.image-object');
+
+      const naturalW = node.imageNaturalWidth || img?.naturalWidth || 260;
+      const naturalH = node.imageNaturalHeight || img?.naturalHeight || 180;
+
+      node.imageWidth = 260;
+      node.imageHeight = Math.max(40, 260 * naturalH / naturalW);
+
+      if (el) {
+        el.style.width = node.imageWidth + 'px';
+        el.style.height = node.imageHeight + 'px';
+      }
+
+      renderConnections();
+      contextMenu.style.display = 'none';
+    };
+
+    contextMenu.querySelector('[data-img-action="border"]').onclick = () => {
+      node.imageBorder = !node.imageBorder;
+      const el = nodeLayer.querySelector(`.node[data-id="${nodeId}"]`);
+      el?.classList.toggle('has-image-border', node.imageBorder);
+      contextMenu.style.display = 'none';
+    };
+  }
+
+  app.addEventListener('contextmenu' , e => {
+    if (e.target.closest('.image-node')) return;
+    if (e.target.closest('.node')) return;
+    e.preventDefault();
+    rebuildCanvasContextMenu();
+    contextMenu.style.left = `${e.clientX}px`;
+    contextMenu.style.top = `${e.clientY}px`;
+    contextMenu.style.display='block';
+    contextMenu.dataset.x=e.clientX;
+    contextMenu.dataset.y=e.clientY;
+  });
+
+  document.addEventListener('pointerdown', e => {
+    if (!e.target.closest('.context-menu')) contextMenu.style.display='none';
+  });
+
+  // Delete/Backspace removes the selected canvas object, except while typing/editing text.
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+
+    const active = document.activeElement;
+    const isTyping =
+      active?.matches?.('textarea, input, [contenteditable="true"]') ||
+      active?.closest?.('textarea, input, [contenteditable="true"]');
+
+    if (isTyping) return;
+
+    const selected = nodeLayer.querySelector('.node.selected');
+    if (!selected) return;
+
+    e.preventDefault();
+    deleteNode(Number(selected.dataset.id));
+  });
+
+  // Disable the browser's native context menu everywhere except editable text.
+  // Canvas/images/ports already provide their own custom right-click behavior.
+  document.addEventListener('contextmenu', e => {
+    if (e.target.closest('textarea, input[type="text"], input[type="search"], [contenteditable="true"]')) {
+      return;
+    }
+
+    // Custom right-click handlers are allowed to run, but the browser menu stays hidden.
+    e.preventDefault();
+  });
+
+  contextMenu.querySelectorAll('[data-ctx]').forEach(btn => btn.onclick = () => {
+    if (btn.dataset.ctx === 'image') {
+      state.pendingUploadNode = null;
+      imagePicker.click();
+      contextMenu.style.display='none';
+      return;
+    }
+    const p = screenToWorld(Number(contextMenu.dataset.x), Number(contextMenu.dataset.y));
+    addNode(btn.dataset.ctx,p.x,p.y);
+    contextMenu.style.display='none';
+  });
+
+  rebuildCanvasContextMenu();
+
+
+  const snapToggle = document.getElementById('snapToggle');
+  if (snapToggle) {
+    snapToggle.checked = state.snapEnabled !== false;
+    snapToggle.addEventListener('change', () => {
+      state.snapEnabled = snapToggle.checked;
+      if (!state.snapEnabled) hideGuides();
+    });
+  }
+
+  function serialize() {
+    return JSON.stringify({
+      version: 1,
+      nodes: state.nodes,
+      connections: state.connections,
+      nextId: state.nextId,
+      panX: state.panX,
+      panY: state.panY,
+      scale: state.scale,
+      snapEnabled: state.snapEnabled !== false
+    }, null, 2);
+  }
+
+  function applyLoadedBoard(s) {
+    state.nodes = s.nodes || [];
+    state.connections = s.connections || [];
+    state.nextId = s.nextId || (Math.max(0,...state.nodes.map(n=>n.id))+1);
+    state.panX = s.panX ?? 0;
+    state.panY = s.panY ?? 0;
+    state.scale = s.scale ?? 1;
+    state.snapEnabled = s.snapEnabled !== false;
+
+    if (snapToggle) snapToggle.checked = state.snapEnabled;
+
+    state.draggingConnection = null;
+    app.classList.remove('connecting');
+    hideGuides();
+
+    nodeLayer.innerHTML = '';
+    state.nodes.forEach(createNodeElement);
+    applyTransform();
+    if (typeof refreshConnectedPorts === 'function') refreshConnectedPorts();
+    renderConnections();
+  }
+
+  function downloadBoardFile(filename = currentBoardFileName || 'workflow.workflow') {
+    const blob = new Blob([serialize()], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename.endsWith('.workflow') || filename.endsWith('.json')
+      ? filename
+      : filename + '.workflow';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function save() {
+    const contents = serialize();
+
+    // If this board was opened through the File System Access API, save back
+    // into the same file rather than creating another download.
+    if (currentBoardFileHandle) {
+      try {
+        const writable = await currentBoardFileHandle.createWritable();
+        await writable.write(contents);
+        await writable.close();
+        flash('File updated');
+        return;
+      } catch (err) {
+        console.warn('Could not replace original file; downloading instead.', err);
+      }
+    }
+
+    // On supported browsers, Save As once so future saves can replace that file.
+    if ('showSaveFilePicker' in window) {
+      try {
+        currentBoardFileHandle = await window.showSaveFilePicker({
+          suggestedName: currentBoardFileName || 'workflow.workflow',
+          types: [{
+            description: 'Workflow board',
+            accept: { 'application/json': ['.workflow', '.json'] }
+          }]
+        });
+
+        currentBoardFileName = currentBoardFileHandle.name || currentBoardFileName;
+        const writable = await currentBoardFileHandle.createWritable();
+        await writable.write(contents);
+        await writable.close();
+        flash('Saved to file');
+        return;
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+        console.warn('Native save picker unavailable; downloading instead.', err);
+      }
+    }
+
+    downloadBoardFile();
+    flash('Downloaded');
+  }
+
+  async function load() {
+    // Chromium/File System Access route: retaining the file handle lets Save
+    // replace the same project file later.
+    if ('showOpenFilePicker' in window) {
+      try {
+        const [handle] = await window.showOpenFilePicker({
+          multiple: false,
+          types: [{
+            description: 'Workflow board',
+            accept: { 'application/json': ['.workflow', '.json'] }
+          }]
+        });
+
+        const file = await handle.getFile();
+        const raw = await file.text();
+        const parsed = JSON.parse(raw);
+
+        currentBoardFileHandle = handle;
+        currentBoardFileName = file.name || 'workflow.workflow';
+        applyLoadedBoard(parsed);
+        flash('Loaded from file');
+        return;
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+        console.warn('Native open picker unavailable; using upload picker.', err);
+      }
+    }
+
+    // Fallback browsers cannot retain permission to overwrite an uploaded file.
+    boardFilePicker.value = '';
+    boardFilePicker.click();
+  }
+
+  boardFilePicker.addEventListener('change', async () => {
+    const file = boardFilePicker.files?.[0];
+    if (!file) return;
+
+    try {
+      const raw = await file.text();
+      const parsed = JSON.parse(raw);
+      currentBoardFileHandle = null;
+      currentBoardFileName = file.name || 'workflow.workflow';
+      applyLoadedBoard(parsed);
+      flash('Loaded from file');
+    } catch (err) {
+      console.error(err);
+      flash('Load failed');
+    } finally {
+      boardFilePicker.value = '';
+    }
+  });
+
+  function clearBoard() {
+    if (!confirm('Clear the entire board?')) return;
+    state.nodes = [];
+    state.connections = [];
+    nodeLayer.innerHTML='';
+    renderConnections();
+  }
+
+  function flash(msg) {
+    const el=document.createElement('div');
+    el.textContent=msg;
+    Object.assign(el.style,{
+      position:'absolute',top:'72px',left:'18px',zIndex:50,
+      padding:'8px 11px',borderRadius:'9px',
+      background:'#1c2230',border:'1px solid #303748',color:'#dfe6f2',
+      fontSize:'12px',boxShadow:'0 8px 25px rgba(0,0,0,.25)'
+    });
+    app.appendChild(el);
+    setTimeout(()=>el.remove(),1200);
+  }
+
+  document.getElementById('saveBtn').onclick=save;
+  document.getElementById('loadBtn').onclick=load;
+  document.getElementById('clearBtn').onclick=clearBoard;
+
+  window.addEventListener('resize', renderConnections);
+
+  // starter nodes
+  addNode('text',120,120,{title:'Idea',text:'Drag me around.\nDouble-click my title to rename me.'});
+  addNode('file',470,340,{title:'Project File'});
+  addConnection(1,2,'#7c8cff','output','input');
+  applyTransform();
+})();
+</script>
+</body>
+</html>
