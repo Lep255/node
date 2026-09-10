@@ -1631,6 +1631,7 @@ if (!state.snapEnabled) return {x,y};
     applyTransform();
     if (typeof refreshConnectedPorts === 'function') refreshConnectedPorts();
     renderConnections();
+    if (autoSaveReady) queueAutoSave();
   }
 
   function downloadBoardFile(filename = currentBoardFileName || 'workflow.workflow') {
@@ -1743,12 +1744,94 @@ if (!state.snapEnabled) return {x,y};
     }
   });
 
+
+  // ---- Automatic local persistence ----
+  // IndexedDB is used instead of localStorage so boards containing images
+  // have substantially more room and still remain entirely on this device.
+  const AUTO_DB_NAME = 'lep255-node-board';
+  const AUTO_DB_STORE = 'boards';
+  const AUTO_DB_KEY = 'default';
+  let autoSaveTimer = null;
+  let lastAutoSaved = '';
+  let autoSaveReady = false;
+
+  function openAutoDB() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(AUTO_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(AUTO_DB_STORE)) {
+          db.createObjectStore(AUTO_DB_STORE);
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function writeAutoSave(force = false) {
+    if (!autoSaveReady && !force) return;
+    const contents = serialize();
+    if (!force && contents === lastAutoSaved) return;
+
+    try {
+      const db = await openAutoDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(AUTO_DB_STORE, 'readwrite');
+        tx.objectStore(AUTO_DB_STORE).put(contents, AUTO_DB_KEY);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+      db.close();
+      lastAutoSaved = contents;
+    } catch (err) {
+      console.warn('Automatic local save failed:', err);
+    }
+  }
+
+  function queueAutoSave() {
+    if (!autoSaveReady) return;
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => writeAutoSave(), 250);
+  }
+
+  async function restoreAutoSave() {
+    try {
+      const db = await openAutoDB();
+      const contents = await new Promise((resolve, reject) => {
+        const tx = db.transaction(AUTO_DB_STORE, 'readonly');
+        const req = tx.objectStore(AUTO_DB_STORE).get(AUTO_DB_KEY);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+      db.close();
+
+      if (!contents) return false;
+      applyLoadedBoard(JSON.parse(contents));
+      lastAutoSaved = serialize();
+      return true;
+    } catch (err) {
+      console.warn('Automatic local load failed:', err);
+      return false;
+    }
+  }
+
+  // Catch state changes made by dragging, editing, adding/removing nodes,
+  // connections, snapping changes, zoom/pan, image resize, etc.
+  ['pointerup', 'change', 'input', 'keyup', 'drop'].forEach(type => {
+    document.addEventListener(type, queueAutoSave, true);
+  });
+  window.addEventListener('beforeunload', () => writeAutoSave(true));
+  setInterval(queueAutoSave, 1500);
+
   function clearBoard() {
     if (!confirm('Clear the entire board?')) return;
     state.nodes = [];
     state.connections = [];
     nodeLayer.innerHTML='';
     renderConnections();
+    queueAutoSave();
   }
 
   function flash(msg) {
@@ -1770,11 +1853,19 @@ if (!state.snapEnabled) return {x,y};
 
   window.addEventListener('resize', renderConnections);
 
-  // starter nodes
-  addNode('text',120,120,{title:'Idea',text:'Drag me around.\nDouble-click my title to rename me.'});
-  addNode('file',470,340,{title:'Project File'});
-  addConnection(1,2,'#7c8cff','output','input');
-  applyTransform();
+  // Restore the local board first. Only show starter nodes on a brand-new board.
+  (async () => {
+    const restored = await restoreAutoSave();
+    if (!restored) {
+      addNode('text',120,120,{title:'Idea',text:'Drag me around.\nDouble-click my title to rename me.'});
+      addNode('file',470,340,{title:'Project File'});
+      addConnection(1,2,'#7c8cff','output','input');
+      applyTransform();
+    }
+    autoSaveReady = true;
+    lastAutoSaved = serialize();
+    queueAutoSave();
+  })();
 })();
 </script>
 </body>
