@@ -612,6 +612,67 @@
     background:#fff;
   }
 
+
+  .image-lightbox{
+    position:fixed;
+    inset:0;
+    z-index:100000;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:42px;
+    background:rgba(0,0,0,.72);
+    backdrop-filter:blur(2px);
+  }
+
+  .image-lightbox.open{
+    display:flex;
+  }
+
+  .image-lightbox-inner{
+    position:relative;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    max-width:100%;
+    max-height:100%;
+  }
+
+  .image-lightbox img{
+    display:block;
+    max-width:calc(100vw - 84px);
+    max-height:calc(100vh - 84px);
+    width:auto;
+    height:auto;
+    object-fit:contain;
+    border-radius:8px;
+    box-shadow:0 18px 70px rgba(0,0,0,.55);
+    user-select:none;
+    -webkit-user-drag:none;
+  }
+
+  .image-lightbox-close{
+    position:absolute;
+    top:-16px;
+    right:-16px;
+    width:34px;
+    height:34px;
+    border:1px solid rgba(255,255,255,.20);
+    border-radius:50%;
+    display:grid;
+    place-items:center;
+    background:rgba(20,23,31,.92);
+    color:#fff;
+    font-size:22px;
+    line-height:1;
+    cursor:pointer;
+    box-shadow:0 5px 20px rgba(0,0,0,.35);
+  }
+
+  .image-lightbox-close:hover{
+    background:#252b38;
+  }
+
 </style>
 </head>
 <body>
@@ -750,6 +811,7 @@
     state.nodes.push(node);
     createNodeElement(node);
     renderConnections();
+    queueAutoSave();
     return node;
   }
 
@@ -772,6 +834,12 @@
       img.src = node.image || '';
       img.alt = '';
       img.draggable = false;
+
+      img.addEventListener('dblclick', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        openImageLightbox(node.image || img.src);
+      });
 
       const resizeFrame = document.createElement('div');
       resizeFrame.className = 'image-resize-frame';
@@ -1053,6 +1121,7 @@
     const exists = state.connections.some(c => c.from === from && c.to === to && c.fromKind === fromKind && c.toKind === toKind);
     if (!exists) state.connections.push({id: crypto.randomUUID?.() || Math.random().toString(36).slice(2), from, to, color, fromKind, toKind});
     renderConnections();
+    queueAutoSave();
   }
 
   function wirePath(a, b, fromKind='output', toKind='input') {
@@ -1238,6 +1307,7 @@ if (!state.snapEnabled) return {x,y};
     nodeLayer.querySelector(`.node[data-id="${id}"]`)?.remove();
     if (typeof refreshConnectedPorts === 'function') refreshConnectedPorts();
     renderConnections();
+    queueAutoSave();
   }
 
   function updateImageNode(drop, node) {
@@ -1595,6 +1665,7 @@ if (!state.snapEnabled) return {x,y};
     snapToggle.addEventListener('change', () => {
       state.snapEnabled = snapToggle.checked;
       if (!state.snapEnabled) hideGuides();
+      queueAutoSave();
     });
   }
 
@@ -1631,7 +1702,7 @@ if (!state.snapEnabled) return {x,y};
     applyTransform();
     if (typeof refreshConnectedPorts === 'function') refreshConnectedPorts();
     renderConnections();
-    if (autoSaveReady) queueAutoSave();
+    if (autoSaveReady) writeAutoSave(true);
   }
 
   function downloadBoardFile(filename = currentBoardFileName || 'workflow.workflow') {
@@ -1823,7 +1894,11 @@ if (!state.snapEnabled) return {x,y};
     document.addEventListener(type, queueAutoSave, true);
   });
   window.addEventListener('beforeunload', () => writeAutoSave(true));
-  setInterval(queueAutoSave, 1500);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') writeAutoSave(true);
+  });
+  window.addEventListener('pagehide', () => writeAutoSave(true));
+  setInterval(queueAutoSave, 750);
 
   function clearBoard() {
     if (!confirm('Clear the entire board?')) return;
@@ -1853,6 +1928,105 @@ if (!state.snapEnabled) return {x,y};
 
   window.addEventListener('resize', renderConnections);
 
+
+  // ---- Teams-style image preview ----
+  const imageLightbox = document.getElementById('imageLightbox');
+  const imageLightboxImg = document.getElementById('imageLightboxImg');
+  const imageLightboxClose = document.getElementById('imageLightboxClose');
+
+  function openImageLightbox(src) {
+    if (!src) return;
+    imageLightboxImg.src = src;
+    imageLightbox.classList.add('open');
+    imageLightbox.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeImageLightbox() {
+    imageLightbox.classList.remove('open');
+    imageLightbox.setAttribute('aria-hidden', 'true');
+    imageLightboxImg.removeAttribute('src');
+  }
+
+  imageLightboxClose.addEventListener('click', e => {
+    e.stopPropagation();
+    closeImageLightbox();
+  });
+
+  imageLightbox.addEventListener('click', e => {
+    if (e.target === imageLightbox) closeImageLightbox();
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && imageLightbox.classList.contains('open')) {
+      e.preventDefault();
+      closeImageLightbox();
+    }
+  });
+
+  // Remember the most recent canvas pointer location for pasted screenshots.
+  let lastCanvasPointer = null;
+  app.addEventListener('pointermove', e => {
+    if (e.target.closest('.toolbar, .context-menu')) return;
+    lastCanvasPointer = { x: e.clientX, y: e.clientY };
+  });
+
+  function screenToWorld(clientX, clientY) {
+    const rect = app.getBoundingClientRect();
+    return {
+      x: (clientX - rect.left - state.panX) / state.scale,
+      y: (clientY - rect.top - state.panY) / state.scale
+    };
+  }
+
+  function addPastedImageFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const probe = new Image();
+      probe.onload = () => {
+        const point = lastCanvasPointer || {
+          x: app.clientWidth / 2,
+          y: app.clientHeight / 2
+        };
+        const world = screenToWorld(point.x, point.y);
+        const width = 260;
+        const height = Math.max(40, width * probe.naturalHeight / Math.max(1, probe.naturalWidth));
+
+        addNode('image', world.x - width / 2, world.y - height / 2, {
+          image: reader.result,
+          imageWidth: width,
+          imageHeight: height,
+          imageNaturalWidth: probe.naturalWidth,
+          imageNaturalHeight: probe.naturalHeight
+        });
+
+        writeAutoSave(true);
+      };
+      probe.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  document.addEventListener('paste', e => {
+    const active = document.activeElement;
+    const editingText =
+      active?.matches?.('textarea, input, [contenteditable="true"]') ||
+      active?.closest?.('textarea, input, [contenteditable="true"]');
+
+    // Normal text paste should continue working inside editors.
+    if (editingText) return;
+
+    const items = Array.from(e.clipboardData?.items || []);
+    const imageItem = items.find(item => item.kind === 'file' && item.type.startsWith('image/'));
+    if (!imageItem) return;
+
+    const file = imageItem.getAsFile();
+    if (!file) return;
+
+    e.preventDefault();
+    addPastedImageFile(file);
+  });
+
+
   // Restore the local board first. Only show starter nodes on a brand-new board.
   (async () => {
     const restored = await restoreAutoSave();
@@ -1863,10 +2037,18 @@ if (!state.snapEnabled) return {x,y};
       applyTransform();
     }
     autoSaveReady = true;
-    lastAutoSaved = serialize();
-    queueAutoSave();
+    lastAutoSaved = '';
+    await writeAutoSave(true);
   })();
 })();
 </script>
+
+<div id="imageLightbox" class="image-lightbox" aria-hidden="true">
+  <div class="image-lightbox-inner">
+    <img id="imageLightboxImg" alt="">
+    <button id="imageLightboxClose" class="image-lightbox-close" type="button" title="Close">×</button>
+  </div>
+</div>
+
 </body>
 </html>
