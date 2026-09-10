@@ -726,6 +726,13 @@
   <input id="boardFilePicker" type="file" accept=".workflow,.json,application/json" hidden>
 </div>
 
+<div id="imageLightbox" class="image-lightbox" aria-hidden="true">
+  <div class="image-lightbox-inner">
+    <img id="imageLightboxImg" alt="">
+    <button id="imageLightboxClose" class="image-lightbox-close" type="button" title="Close">×</button>
+  </div>
+</div>
+
 <script>
 (() => {
   const app = document.getElementById('app');
@@ -885,6 +892,7 @@
       setupImageResize(el, node, handles);
 
       el.addEventListener('pointerdown', e => {
+        if (e.detail > 1) return;
         if (!e.target.closest('.port,.resize-handle')) selectNode(node.id);
       });
 
@@ -1947,6 +1955,21 @@ if (!state.snapEnabled) return {x,y};
     imageLightboxImg.removeAttribute('src');
   }
 
+
+  // Delegated image preview fallback: catches double-clicks before node-drag
+  // handlers can consume them, including restored and newly pasted images.
+  app.addEventListener('dblclick', e => {
+    const img = e.target.closest?.('.image-node img.image-object');
+    if (!img) return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    const nodeEl = img.closest('.node');
+    const node = state.nodes.find(n => n.id === Number(nodeEl?.dataset.id));
+    openImageLightbox(node?.image || img.src);
+  }, true);
+
   imageLightboxClose.addEventListener('click', e => {
     e.stopPropagation();
     closeImageLightbox();
@@ -2007,24 +2030,29 @@ if (!state.snapEnabled) return {x,y};
   }
 
   document.addEventListener('paste', e => {
-    const active = document.activeElement;
-    const editingText =
-      active?.matches?.('textarea, input, [contenteditable="true"]') ||
-      active?.closest?.('textarea, input, [contenteditable="true"]');
-
-    // Normal text paste should continue working inside editors.
-    if (editingText) return;
-
     const items = Array.from(e.clipboardData?.items || []);
-    const imageItem = items.find(item => item.kind === 'file' && item.type.startsWith('image/'));
-    if (!imageItem) return;
 
-    const file = imageItem.getAsFile();
-    if (!file) return;
+    // If the clipboard contains an image (Snipping Tool, Print Screen,
+    // copied browser image, etc.), treat it as an image upload regardless
+    // of which canvas control still has focus.
+    const imageItem = items.find(item =>
+      item.kind === 'file' &&
+      typeof item.type === 'string' &&
+      item.type.startsWith('image/')
+    );
 
-    e.preventDefault();
-    addPastedImageFile(file);
-  });
+    if (imageItem) {
+      const file = imageItem.getAsFile();
+      if (file) {
+        e.preventDefault();
+        e.stopPropagation();
+        addPastedImageFile(file);
+      }
+      return;
+    }
+
+    // No image in the clipboard: normal text paste continues untouched.
+  }, true);
 
 
   // Restore the local board first. Only show starter nodes on a brand-new board.
@@ -2042,13 +2070,6 @@ if (!state.snapEnabled) return {x,y};
   })();
 })();
 </script>
-
-<div id="imageLightbox" class="image-lightbox" aria-hidden="true">
-  <div class="image-lightbox-inner">
-    <img id="imageLightboxImg" alt="">
-    <button id="imageLightboxClose" class="image-lightbox-close" type="button" title="Close">×</button>
-  </div>
-</div>
 
 </body>
 </html>
