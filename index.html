@@ -2220,6 +2220,37 @@
   .node-title:active{cursor:grabbing;}
   .node-title:has(.node-title-editor){cursor:text;}
 
+
+  /* Hidden media in the shared image/video lightbox must stay hidden.
+     Author display:flex rules otherwise override the browser's [hidden] rule. */
+  .image-lightbox .media-video-shell[hidden],
+  .image-lightbox img[hidden],
+  .image-lightbox .image-zoom-controls[hidden],
+  .image-lightbox .media-fullscreen-btn[hidden]{
+    display:none !important;
+  }
+
+  /* Keep close/delete controls clickable even when an object is very small
+     or another media layer is positioned nearby. */
+  .image-lightbox-close{
+    z-index:50 !important;
+    pointer-events:auto !important;
+  }
+
+  .node-delete{
+    flex:0 0 28px;
+    min-width:28px;
+    position:relative;
+    z-index:20;
+    pointer-events:auto;
+  }
+  .node-header{
+    min-width:0;
+  }
+  .node-title{
+    min-width:0;
+  }
+
 </style>
 </head>
 <body>
@@ -7000,7 +7031,11 @@ if (!state.snapEnabled) return {x,y};
     } else {
       mediaLightboxVideo.pause();
       mediaLightboxVideo.removeAttribute('src');
+      mediaLightboxVideo.load?.();
       mediaVideoShell.hidden = true;
+      mediaFullscreenBtn.hidden = true;
+      imageLightboxImg.hidden = false;
+      imageZoomControls.hidden = false;
       imageLightboxImg.src = src;
       resetImageLightboxZoom();
     }
@@ -7016,7 +7051,9 @@ if (!state.snapEnabled) return {x,y};
   function closeImageLightbox() {
     mediaLightboxVideo.pause();
     mediaLightboxVideo.removeAttribute('src');
+    mediaLightboxVideo.load?.();
     mediaVideoShell.hidden = true;
+    mediaFullscreenBtn.hidden = true;
     imageZoomControls.hidden = true;
     resetImageLightboxZoom();
     imageLightboxImg.removeAttribute('src');
