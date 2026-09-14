@@ -2220,48 +2220,6 @@
   .node-title:active{cursor:grabbing;}
   .node-title:has(.node-title-editor){cursor:text;}
 
-
-  .missing-media-shell{
-    width:100%;
-    min-height:96px;
-    box-sizing:border-box;
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    justify-content:center;
-    gap:8px;
-    padding:14px;
-    border:1px dashed #4a556c;
-    border-radius:10px;
-    background:#141a23;
-    color:#aeb8c8;
-    text-align:center;
-  }
-  .missing-media-shell .missing-media-name{
-    max-width:100%;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
-    color:#e3e8f0;
-    font-size:12px;
-    font-weight:600;
-  }
-  .missing-media-shell .missing-media-note{
-    font-size:11px;
-    color:#7f8ba0;
-  }
-  .missing-media-shell button{
-    appearance:none;
-    border:1px solid #3c465b;
-    border-radius:7px;
-    background:#202735;
-    color:#dbe3ef;
-    padding:6px 10px;
-    cursor:pointer;
-    font:inherit;
-  }
-  .missing-media-shell button:hover{background:#2a3344;}
-
 </style>
 </head>
 <body>
@@ -2440,8 +2398,6 @@
             <li>Audio files—including MP3, M4A/M4B, AAC, WAV, FLAC, OGG and Opus—can be dropped or added with Media and use a compact Play/Pause, timestamp, and seek/progress bar.</li>
             <li>Audio nodes show the source filename above the playback controls.</li>
             <li>Large binary media/assets are stored separately from the workflow structure, avoiding Base64-heavy autosaves.</li>
-            <li>Manual Save creates a portable workflow that embeds binary assets so the project can move between PCs or GitHub Pages.</li>
-            <li>Automatic browser autosave remains lightweight for performance.</li>
             <li>Project files use virtual paths inside each node. Renaming/moving a virtual path never changes the original file on disk.</li>
             <li>Code edits are node-local working copies and only persist when Save/Ctrl+S is used. Real-time preview changes are discarded when closed unless saved.</li>
             <li>Double-click a video to open the large media viewer; the large viewer includes a full-screen button.</li>
@@ -2553,8 +2509,6 @@
   const contextMenu = document.getElementById('contextMenu');
   const zoomLabel = document.getElementById('zoomLabel');
   const imagePicker = document.getElementById('imagePicker');
-  const relinkMediaPicker = document.getElementById('relinkMediaPicker');
-  let pendingRelinkMediaNodeId = null;
   const filePicker = document.getElementById('filePicker');
   const folderPicker = document.getElementById('folderPicker');
   const boardFilePicker = document.getElementById('boardFilePicker');
@@ -2662,69 +2616,6 @@
       const runtimeMediaSrc = node.mediaObjectUrl || node.audio || node.video || node.image || '';
       const isAudio = node.mediaKind === 'audio' || !!node.audio;
       const isVideo = !isAudio && (node.mediaKind === 'video' || !!node.video);
-
-      // Workflow files intentionally do not contain large binary payloads.
-      // When a workflow is opened under a different origin (for example
-      // file:// -> GitHub Pages), IndexedDB is different and the local asset ID
-      // cannot be resolved. Keep the node visible and relinkable instead of
-      // rendering an empty/blank media object.
-      if (node.mediaAssetId && !runtimeMediaSrc) {
-        node.resourceMissing = true;
-        el.classList.add('missing-media-node');
-
-        const shell = document.createElement('div');
-        shell.className = 'missing-media-shell';
-
-        const icon = document.createElement('div');
-        icon.style.fontSize = '24px';
-        icon.textContent = node.mediaKind === 'video' ? '🎬' :
-          node.mediaKind === 'audio' ? '🎵' : '🖼️';
-
-        const name = document.createElement('div');
-        name.className = 'missing-media-name';
-        name.textContent = node.mediaName || 'Local media';
-
-        const note = document.createElement('div');
-        note.className = 'missing-media-note';
-        note.textContent = 'Local asset is not available in this browser/site.';
-
-        const relink = document.createElement('button');
-        relink.type = 'button';
-        relink.textContent = 'Relink file';
-        relink.addEventListener('pointerdown', e => e.stopPropagation());
-        relink.addEventListener('click', e => {
-          e.preventDefault();
-          e.stopPropagation();
-          pendingRelinkMediaNodeId = node.id;
-          relinkMediaPicker.value = '';
-          relinkMediaPicker.click();
-        });
-
-        shell.append(icon, name, note, relink);
-        body.append(shell);
-
-        const inPort = makePort(node, 'input');
-        const outPort = makePort(node, 'output');
-        const topPort = makePort(node, 'top');
-        const bottomPort = makePort(node, 'bottom');
-
-        el.append(body, inPort, outPort, topPort, bottomPort);
-        nodeLayer.appendChild(el);
-
-        node.imageWidth = Math.max(260, node.imageWidth || 260);
-        node.imageHeight = Math.max(110, node.imageHeight || 110);
-        el.style.width = node.imageWidth + 'px';
-        el.style.height = node.imageHeight + 'px';
-        body.style.width = '100%';
-        body.style.height = '100%';
-
-        makeNodeDraggable(el, shell, node, true);
-        el.addEventListener('pointerdown', e => {
-          if (!e.target.closest('button,.port')) selectNode(node.id);
-        });
-        requestAnimationFrame(renderConnections);
-        return;
-      }
 
       if (isAudio) {
         el.classList.add('audio-media-node');
@@ -3686,35 +3577,6 @@ if (!state.snapEnabled) return {x,y};
     return readMediaForNode(nodeId, file);
   }
 
-  relinkMediaPicker.addEventListener('change', async () => {
-    const file = relinkMediaPicker.files?.[0];
-    const nodeId = pendingRelinkMediaNodeId;
-    pendingRelinkMediaNodeId = null;
-
-    if (!file || !nodeId) return;
-
-    const node = nodeById(nodeId);
-    if (!node) return;
-
-    const expectedKind = node.mediaKind || '';
-    const actualKind = detectMediaKind(file);
-
-    if (!actualKind) {
-      flash('Unsupported media file');
-      return;
-    }
-
-    if (expectedKind && actualKind !== expectedKind) {
-      const okay = confirm(
-        `This node was ${expectedKind}, but you selected ${actualKind}. Use it anyway?`
-      );
-      if (!okay) return;
-    }
-
-    await readMediaForNode(nodeId, file);
-    flash('Media relinked');
-  });
-
   const EDITABLE_FILE_EXTENSIONS = new Set([
     'html','htm','php','phtml','js','mjs','cjs','jsx','ts','tsx',
     'java','css','scss','sass','less','json','jsonc','xml','svg',
@@ -3933,11 +3795,7 @@ if (!state.snapEnabled) return {x,y};
           ${isArchiveFile(primary.name || primary.path) && (!!primary.assetId || !!primary.dataUrl)
             ? `<button class="file-action-btn" type="button" data-file-action="archive">View contents</button>` : ''}
         </div>
-        <div class="file-meta file-replace-hint">${
-          files.some(f => f?.assetId && f.resourceMissing)
-            ? `${files.filter(f => f?.assetId && f.resourceMissing).length} local asset(s) need relinking · Use Files to manage this project node`
-            : 'Use Files to manage this project node'
-        }</div>
+        <div class="file-meta file-replace-hint">Use Files to manage this project node</div>
       `;
     }
 
@@ -5107,10 +4965,7 @@ if (!state.snapEnabled) return {x,y};
     });
 
     return JSON.stringify({
-      version: 3,
-      savedOrigin: location.origin || 'file://',
-      savedAt: new Date().toISOString(),
-      storageModel: 'structure-plus-local-asset-ids',
+      version: 2,
       nodes: cleanNodes,
       connections: state.connections,
       nextId: state.nextId,
@@ -5132,18 +4987,19 @@ if (!state.snapEnabled) return {x,y};
   }
 
   async function serializePortable() {
-    // Keep autosave lightweight, but make the manual Save file portable.
+    // Manual Save only: make a portable copy while leaving normal autosave
+    // and runtime storage untouched.
     const board = JSON.parse(serialize());
-
-    board.version = 4;
-    board.savedOrigin = location.origin || 'file://';
-    board.savedAt = new Date().toISOString();
+    board.version = Math.max(Number(board.version || 0), 4);
     board.storageModel = 'portable-embedded-assets';
+    board.savedAt = new Date().toISOString();
 
-    for (const node of board.nodes || []) {
-      const liveNode = state.nodes.find(n => n.id === node.id);
+    for (const exportedNode of board.nodes || []) {
+      const liveNode = state.nodes.find(n => n.id === exportedNode.id);
+      if (!liveNode) continue;
 
-      if (liveNode?.mediaAssetId) {
+      // Standalone media: embed the actual binary into the exported workflow.
+      if (liveNode.mediaAssetId) {
         try {
           const record = await getLocalAsset(liveNode.mediaAssetId);
           if (record?.blob) {
@@ -5151,31 +5007,30 @@ if (!state.snapEnabled) return {x,y};
             const kind = liveNode.mediaKind ||
               (liveNode.audio ? 'audio' : liveNode.video ? 'video' : 'image');
 
-            node.image = '';
-            node.video = '';
-            node.audio = '';
+            exportedNode.image = '';
+            exportedNode.video = '';
+            exportedNode.audio = '';
 
-            if (kind === 'audio') node.audio = dataUrl;
-            else if (kind === 'video') node.video = dataUrl;
-            else node.image = dataUrl;
+            if (kind === 'audio') exportedNode.audio = dataUrl;
+            else if (kind === 'video') exportedNode.video = dataUrl;
+            else exportedNode.image = dataUrl;
 
-            // Do not export an IndexedDB ID tied to this browser origin.
-            node.mediaAssetId = '';
-            delete node.mediaObjectUrl;
-            delete node.resourceMissing;
+            exportedNode.mediaAssetId = '';
+            delete exportedNode.mediaObjectUrl;
+            delete exportedNode.resourceMissing;
           }
         } catch (err) {
-          console.warn('Could not embed media asset for portable save:', err);
+          console.warn('Portable save: could not embed media asset', err);
         }
       }
 
-      if (Array.isArray(node.files) && Array.isArray(liveNode?.files)) {
-        for (const exportedFile of node.files) {
+      // Project/file-node binaries: embed only into the exported copy.
+      if (Array.isArray(exportedNode.files) && Array.isArray(liveNode.files)) {
+        for (const exportedFile of exportedNode.files) {
           const liveFile = liveNode.files.find(f =>
             normalizeVirtualPath(f.path || f.name) ===
             normalizeVirtualPath(exportedFile.path || exportedFile.name)
           );
-
           if (!liveFile?.assetId) continue;
 
           try {
@@ -5189,18 +5044,18 @@ if (!state.snapEnabled) return {x,y};
             delete exportedFile.resourceMissing;
           } catch (err) {
             console.warn(
-              'Could not embed project asset for portable save:',
+              'Portable save: could not embed project asset',
               exportedFile.path || exportedFile.name,
               err
             );
           }
         }
 
-        const primaryPath = normalizeVirtualPath(node.primaryFilePath || '');
-        const primary = node.files.find(f =>
+        const primaryPath = normalizeVirtualPath(exportedNode.primaryFilePath || '');
+        const primary = exportedNode.files.find(f =>
           normalizeVirtualPath(f.path || f.name) === primaryPath
         );
-        node.fileDataUrl = primary?.dataUrl || '';
+        if (primary?.dataUrl) exportedNode.fileDataUrl = primary.dataUrl;
       }
     }
 
@@ -5228,31 +5083,6 @@ if (!state.snapEnabled) return {x,y};
     applyTransform();
     if (typeof refreshConnectedPorts === 'function') refreshConnectedPorts();
     renderConnections();
-
-    const missingMedia = state.nodes.filter(n => n.mediaAssetId && n.resourceMissing).length;
-    const missingProjectAssets = state.nodes.reduce((count, n) => {
-      return count + (Array.isArray(n.files)
-        ? n.files.filter(f => f?.assetId && f.resourceMissing).length
-        : 0);
-    }, 0);
-
-    const sourceOrigin = s.savedOrigin || '';
-    const currentOrigin = location.origin || 'file://';
-    const crossedOrigin = !!sourceOrigin && sourceOrigin !== currentOrigin;
-
-    if (missingMedia || missingProjectAssets) {
-      setTimeout(() => {
-        const total = missingMedia + missingProjectAssets;
-        flash(
-          crossedOrigin
-            ? `Structure restored. ${total} local asset${total === 1 ? '' : 's'} need relinking on this site.`
-            : `Structure restored. ${total} local asset${total === 1 ? '' : 's'} are unavailable.`
-        );
-      }, 80);
-    } else {
-      setTimeout(() => flash('Workflow restored'), 80);
-    }
-
     if (autoSaveReady) writeAutoSave(true);
   }
 
@@ -5370,10 +5200,8 @@ if (!state.snapEnabled) return {x,y};
 
 
   // ---- Automatic local persistence ----
-  // Autosave intentionally stays lightweight for performance.
-  // Manual Save uses serializePortable() so the exported workflow can move
-  // between different PCs, local HTML, and hosted copies of the app.
-  // IndexedDB keeps local binary assets available between normal sessions.
+  // IndexedDB is used instead of localStorage so boards containing images
+  // have substantially more room and still remain entirely on this device.
   const AUTO_DB_NAME = 'lep255-node-board';
   const AUTO_DB_STORE = 'boards';
   const AUTO_DB_KEY = 'default';
@@ -6019,7 +5847,7 @@ if (!state.snapEnabled) return {x,y};
         <div class="project-manager-detail"><b>Workspace state</b><br>${
           typeof current.text === 'string'
             ? (current.modified ? 'Modified working copy' : 'Source snapshot / unchanged')
-            : (current.resourceMissing ? 'Local asset missing on this browser/site — relink required' : 'Referenced binary asset')
+            : (current.resourceMissing ? 'Local asset missing — relink required' : 'Referenced binary asset')
         }</div>
       `;
     }
